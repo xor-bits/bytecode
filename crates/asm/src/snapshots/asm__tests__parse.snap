@@ -1,0 +1,8 @@
+---
+source: crates/asm/src/lib.rs
+expression: asm
+---
+i32.const.0
+loop:
+i32.debug
+jump loop

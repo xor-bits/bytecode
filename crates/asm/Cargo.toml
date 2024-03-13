@@ -1,0 +1,16 @@
+[package]
+name = "asm"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dev-dependencies]
+insta = "1.36"
+
+[build-dependencies]
+lalrpop = "0.20"
+
+[dependencies]
+lalrpop-util = { version = "0.20", features = ["lexer", "unicode"] }
+num_enum = "0.7"
+# asm-macros.path = "../asm-macros"

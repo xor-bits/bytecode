@@ -1,0 +1,12 @@
+[package]
+name = "vm"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dev-dependencies]
+insta = "1.36"
+
+[dependencies]
+thiserror = "1.0"
+asm.path = "../asm"

@@ -1,0 +1,40 @@
+use crate::{Assembly, Instruction, Label, Line};
+
+grammar;
+
+match {
+	r"\s*" => {}, // Skip whitespaces
+    r"//[^\n\r]*[\n\r]*" => { }, // Skip `// comments`
+    r"/\*[^*]*\*+(?:[^/*][^*]*\*+)*/" => { },  // Skip `/* comments */`
+} else {
+	_
+}
+
+pub Assembly: Assembly<'input> = {
+	<lines:Line*> => Assembly(lines),
+};
+
+pub Line: Line<'input> = {
+	<label:(<Label> ":")?> <instr:Instruction> => Line { instr, label },
+}
+
+pub Instruction: Instruction<'input> = {
+	"i32.const.0" => Instruction::I32Const0,
+	"i32.const.1" => Instruction::I32Const1,
+	"i32.const.2" => Instruction::I32Const2,
+	"i32.store.0" => Instruction::I32Store0,
+	"i32.store.1" => Instruction::I32Store1,
+	"i32.store.2" => Instruction::I32Store2,
+	"i32.load.0" => Instruction::I32Load0,
+	"i32.load.1" => Instruction::I32Load1,
+	"i32.load.2" => Instruction::I32Load2,
+	"i32.add" => Instruction::I32Add,
+	"i32.inc" => Instruction::I32Inc,
+	// "i32.push" => Instruction::I32Push,
+	"i32.debug" => Instruction::I32Debug,
+	"jump" <Label> => Instruction::Jump(<>),
+};
+
+pub Label: Label<'input> = {
+	r"[a-zA-Z]+" => Label(<>)
+}
