@@ -1,0 +1,9 @@
+[package]
+name = "repl"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+asm.path = "../asm"
+vm.path = "../vm"

@@ -30,9 +30,12 @@ pub Instruction: Instruction<'input> = {
 	"i32.load.2" => Instruction::I32Load2,
 	"i32.add" => Instruction::I32Add,
 	"i32.inc" => Instruction::I32Inc,
-	// "i32.push" => Instruction::I32Push,
+	"i32.push" <r"[\d+]"> => Instruction::I32Push(<>.parse().unwrap()),
 	"i32.debug" => Instruction::I32Debug,
 	"jump" <Label> => Instruction::Jump(<>),
+	"call" <Label> => Instruction::Call(<>),
+	"return" => Instruction::Return,
+	"exit" => Instruction::Exit,
 };
 
 pub Label: Label<'input> = {

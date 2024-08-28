@@ -21,79 +21,24 @@ impl<'input> Assembly<'input> {
     }
 
     pub fn assemble(&self) -> Vec<u8> {
-        let mut code = Vec::new();
-
-        code.extend_from_slice(b"yeet");
-
-        enum Label {
-            Fixup(Vec<usize>),
-            Result(usize),
-        }
-
-        let mut labels = HashMap::new();
+        let mut assembler = Assembler::init();
 
         for line in self.0.iter() {
             if let Some(label) = line.label.as_ref() {
-                // can shadow older labels
-                let dst = code.len();
-                if let Some(Label::Fixup(needs_fixing)) = labels.insert(label.0, Label::Result(dst))
-                {
-                    for needs_fixing_at in needs_fixing {
-                        if let Some(code_dst_bytes) = code
-                            .get_mut(needs_fixing_at..needs_fixing_at + 8)
-                            .and_then(|s| <&mut [u8; 8]>::try_from(s).ok())
-                        {
-                            if needs_fixing_at.abs_diff(dst) > i16::MAX as usize {
-                                panic!("relative jump too large");
-                            }
-                            let dst_b =
-                                ((dst as isize - needs_fixing_at as isize) as i16).to_le_bytes();
-                            code_dst_bytes.copy_from_slice(&dst_b);
-                        }
-                    }
-                }
+                assembler.insert_label(label.0);
             }
 
-            let num: u8 = line.instr.opcode().into();
-            code.push(num);
+            assembler.insert_opcode(line.instr.opcode());
 
             match &line.instr {
-                Instruction::I32Push(i32) => {
-                    for b in i32.to_le_bytes() {
-                        code.push(b);
-                    }
-                }
-                Instruction::Jump(l) => match labels.entry(l.0) {
-                    Entry::Occupied(mut e) => match e.get_mut() {
-                        Label::Fixup(e) => {
-                            e.push(code.len());
-                            code.extend_from_slice(&[0; 2]);
-                        }
-                        Label::Result(e) => {
-                            if (code.len() - 1).abs_diff(*e) > i16::MAX as usize {
-                                panic!("relative jump too large");
-                            }
-                            code.extend_from_slice(
-                                &(((*e) as isize - (code.len() - 1) as isize) as i16).to_le_bytes(),
-                            );
-                        }
-                    },
-                    Entry::Vacant(e) => {
-                        e.insert(Label::Fixup(vec![code.len()]));
-                        code.extend_from_slice(&[0; 2]);
-                    }
-                },
+                Instruction::I32Push(i) => assembler.insert_i16(*i),
+                Instruction::Jump(label) => assembler.insert_label_addr(label.0),
+                Instruction::Call(label) => assembler.insert_label_addr(label.0),
                 _ => {}
             }
         }
 
-        for (sym, unresolved) in labels {
-            if let Label::Fixup(..) = unresolved {
-                panic!("unresolved symbol `{sym}`");
-            }
-        }
-
-        code
+        assembler.finish()
     }
 }
 
@@ -116,6 +61,96 @@ impl fmt::Display for Assembly<'_> {
 
         Ok(())
     }
+}
+
+//
+
+pub struct Assembler<'a> {
+    code: Vec<u8>,
+    labels: HashMap<&'a str, LabelReference>,
+}
+
+impl<'a> Assembler<'a> {
+    pub fn init() -> Self {
+        let mut code = Vec::new();
+        code.extend_from_slice(b"yeet");
+        let labels = HashMap::new();
+        Self { code, labels }
+    }
+
+    pub fn insert_opcode(&mut self, opcode: OpCode) {
+        self.code.push(opcode.into_byte());
+    }
+
+    pub fn insert_i16(&mut self, i: i16) {
+        for b in i.to_le_bytes() {
+            self.code.push(b);
+        }
+    }
+
+    /// get the current code address and set its label
+    pub fn insert_label(&mut self, label: &'a str) {
+        let dst = self.code.len();
+        if let Some(LabelReference::Fixup(needs_fixing)) =
+            self.labels.insert(label, LabelReference::Result(dst))
+        {
+            // fix all references created before the label was created
+            for needs_fixing_at in needs_fixing {
+                // println!("fixing {needs_fixing_at}");
+                if let Some(code_dst_bytes) = self
+                    .code
+                    .get_mut(needs_fixing_at..needs_fixing_at + 2)
+                    .and_then(|s| <&mut [u8; 2]>::try_from(s).ok())
+                {
+                    let delta = i16::from_le_bytes(*code_dst_bytes);
+                    let delta_ip = dst as isize - needs_fixing_at as isize + delta as isize;
+                    let delta_ip: i16 = delta_ip.try_into().expect("relative jump too large");
+                    code_dst_bytes.copy_from_slice(&delta_ip.to_le_bytes());
+                }
+            }
+        }
+    }
+
+    /// read the address of a label and insert it into code (lazily)
+    pub fn insert_label_addr(&mut self, label: &'a str) {
+        match self.labels.entry(label) {
+            Entry::Occupied(mut e) => match e.get_mut() {
+                LabelReference::Fixup(e) => {
+                    // this is yet another reference to a label that has not yet been created
+                    e.push(self.code.len());
+                    self.code.extend_from_slice(&1i16.to_le_bytes());
+                }
+                LabelReference::Result(e) => {
+                    // the label is already known
+                    let delta_ip = (*e) as isize - self.code.len() as isize + 1;
+                    let delta_ip: i16 = delta_ip.try_into().expect("relative jump too large");
+                    self.code.extend_from_slice(&delta_ip.to_le_bytes());
+                }
+            },
+            Entry::Vacant(e) => {
+                // fix the address later
+                e.insert(LabelReference::Fixup(vec![self.code.len()]));
+                self.code.extend_from_slice(&1i16.to_le_bytes());
+            }
+        }
+    }
+
+    pub fn finish(self) -> Vec<u8> {
+        for (sym, unresolved) in self.labels {
+            if let LabelReference::Fixup(..) = unresolved {
+                panic!("unresolved symbol `{sym}`");
+            }
+        }
+
+        self.code
+    }
+}
+
+//
+
+enum LabelReference {
+    Fixup(Vec<usize>),
+    Result(usize),
 }
 
 //
@@ -144,6 +179,9 @@ pub enum Instruction<'input> {
     I32Push(i16),
     I32Debug,
     Jump(Label<'input>),
+    Call(Label<'input>),
+    Return,
+    Exit,
 }
 
 impl<'input> Instruction<'input> {
@@ -170,6 +208,9 @@ impl<'input> Instruction<'input> {
             I32Push,
             I32Debug,
             Jump,
+            Call,
+            Return,
+            Exit,
         }
     }
 }
@@ -193,6 +234,9 @@ pub enum OpCode {
     I32Push,
     I32Debug,
     Jump,
+    Call,
+    Return,
+    Exit,
     #[default]
     Invalid = 255,
 }
@@ -222,6 +266,9 @@ impl OpCode {
             OpCode::I32Push => "i32.push",
             OpCode::I32Debug => "i32.debug",
             OpCode::Jump => "jump",
+            OpCode::Call => "call",
+            OpCode::Return => "return",
+            OpCode::Exit => "exit",
             OpCode::Invalid => "",
         }
     }
@@ -257,6 +304,19 @@ mod tests {
                   i32.const.1 // push 1
                   i32.add     // pop 2 ints and push the sum
                   jump loop   // infinite loop
+            "#;
+        let asm = Assembly::parse(asm);
+        let bc = asm.assemble();
+        insta::assert_debug_snapshot!(bc);
+    }
+
+    #[test]
+    fn back_and_front_refs() {
+        let asm = r#"
+                  jump loop
+            loop: i32.load.0
+                  i32.debug
+                  jump loop
             "#;
         let asm = Assembly::parse(asm);
         let bc = asm.assemble();
